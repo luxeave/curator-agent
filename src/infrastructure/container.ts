@@ -3,7 +3,7 @@ import type { WorkspacePort } from "../ports/WorkspacePort.js";
 import type { CategorizationPort } from "../ports/CategorizationPort.js";
 import type { LoggerPort } from "../ports/LoggerPort.js";
 import { FsWorkspace } from "../adapters/fs/FsWorkspace.js";
-import { OpenAICategorizationAdapter } from "../adapters/ai/OpenAICategorizationAdapter.js";
+import { CategorizationAdapterFactory } from "../adapters/ai/CategorizationAdapterFactory.js";
 import { ConsoleLogger } from "../adapters/logging/ConsoleLogger.js";
 import { CategorizeNoteUseCase } from "../application/CategorizeNoteUseCase.js";
 import { loadConfig, type AppConfig } from "./config.js";
@@ -49,7 +49,8 @@ export class Container {
 
     get categorizer(): CategorizationPort {
         if (!this._categorizer) {
-            this._categorizer = new OpenAICategorizationAdapter({
+            this._categorizer = CategorizationAdapterFactory.create({
+                provider: this.config.llmProvider,
                 model: this.config.aiModel,
             });
         }
