@@ -1,13 +1,13 @@
 #!/usr/bin/env bun
-import { categorizeNoteAgent } from "../agent/categorizeNoteAgent";
+import { createContainer } from "../infrastructure/container.js";
 
 async function main() {
     const [, , argPath] = process.argv;
 
     if (!argPath) {
         console.error(
-            "Usage: kb-curator categorize <relative-path-to-note.md>\n" +
-            "Example: kb-curator categorize inbox/idea.md"
+            "Usage: curator-agent <relative-path-to-note.md>\n" +
+            "Example: curator-agent inbox/idea.md"
         );
         process.exit(1);
     }
@@ -15,8 +15,24 @@ async function main() {
     // Normalize to a workspace-relative POSIX-style path
     const relPath = argPath.replace(/^\.?[\/\\]*/, "").replace(/\\/g, "/");
 
-    console.log(`Categorizing note: ${relPath}`);
-    await categorizeNoteAgent({ relativePath: relPath });
+    // Create DI container and get the use case
+    const container = createContainer();
+    const categorizeNote = container.categorizeNoteUseCase;
+
+    // Execute the use case
+    const result = await categorizeNote.execute({ relativePath: relPath });
+
+    // Output summary
+    console.log("\n=== Categorization Result ===");
+    console.log(`Note: "${result.originalNote.title}"`);
+    if (result.wasMoved) {
+        const from = result.originalNote.category?.toString() ?? "(root)";
+        const to = result.updatedNote.category?.toString() ?? "(root)";
+        console.log(`Moved: ${from} → ${to}`);
+    } else {
+        console.log(`Status: Already in optimal category`);
+    }
+    console.log(`Reasoning: ${result.reasoning}`);
 }
 
 main().catch((err) => {
