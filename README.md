@@ -8,30 +8,119 @@ Curator Agent is a CLI tool that uses AI (via the Vercel AI SDK) to intelligentl
 
 ## Architecture
 
-The project follows a clean **hexagonal architecture** (ports & adapters pattern):
+The project follows a clean **hexagonal architecture** (ports & adapters pattern) with proper separation of concerns:
 
 ```
 src/
-├── agent/           # AI agent logic (LLM-powered categorization)
-│   └── categorizeNoteAgent.ts
-├── cli/             # Command-line interface entry point
-│   └── index.ts
-├── domain/          # Core domain models
-│   ├── note.ts      # Note and CategoryPath value objects
-│   └── categorization.ts  # Categorization actions and suggestions
-├── ports/           # Abstract interfaces (ports)
-│   └── WorkspacePort.ts   # Workspace operations interface
-└── adapters/        # Concrete implementations (adapters)
-    └── fs/
-        └── FsWorkspace.ts  # Filesystem-based workspace implementation
+├── application/          # Use cases / Application services
+│   └── CategorizeNoteUseCase.ts
+├── domain/               # Core domain models (no dependencies)
+│   ├── note.ts           # Note and CategoryPath value objects
+│   └── categorization.ts # Categorization actions and suggestions
+├── ports/                # Abstract interfaces (driven & driving ports)
+│   ├── WorkspacePort.ts      # Workspace operations interface
+│   ├── CategorizationPort.ts # AI categorization interface
+│   └── LoggerPort.ts         # Logging abstraction
+├── adapters/             # Concrete implementations
+│   ├── ai/
+│   │   └── OpenAICategorizationAdapter.ts  # OpenAI-based categorization
+│   ├── fs/
+│   │   └── FsWorkspace.ts                  # Filesystem workspace
+│   └── logging/
+│       └── ConsoleLogger.ts                # Console logging
+├── infrastructure/       # Configuration and DI
+│   ├── config.ts         # Environment configuration
+│   └── container.ts      # Dependency injection container
+└── cli/                  # Entry point
+    └── index.ts
+```
+
+### Architectural Layers
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                        CLI / Entry Point                        │
+│                     (src/cli/index.ts)                          │
+└─────────────────────────────────────────────────────────────────┘
+                                │
+                                ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                    Infrastructure Layer                         │
+│         (Container, Config - src/infrastructure/)               │
+└─────────────────────────────────────────────────────────────────┘
+                                │
+                                ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                    Application Layer                            │
+│          (Use Cases - src/application/)                         │
+│                                                                 │
+│  ┌─────────────────────────────────────────────────────────┐   │
+│  │  CategorizeNoteUseCase                                   │   │
+│  │  - Orchestrates the categorization workflow              │   │
+│  │  - Depends only on ports (interfaces)                    │   │
+│  └─────────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────┘
+                                │
+            ┌───────────────────┼───────────────────┐
+            ▼                   ▼                   ▼
+┌───────────────────┐ ┌───────────────────┐ ┌───────────────────┐
+│   WorkspacePort   │ │ CategorizationPort│ │    LoggerPort     │
+│   (interface)     │ │   (interface)     │ │   (interface)     │
+└───────────────────┘ └───────────────────┘ └───────────────────┘
+            │                   │                   │
+            ▼                   ▼                   ▼
+┌───────────────────┐ ┌───────────────────┐ ┌───────────────────┐
+│   FsWorkspace     │ │ OpenAICategoriz-  │ │  ConsoleLogger    │
+│   (adapter)       │ │ ationAdapter      │ │   (adapter)       │
+└───────────────────┘ └───────────────────┘ └───────────────────┘
+                                │
+                                ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                       Domain Layer                              │
+│                    (src/domain/)                                │
+│                                                                 │
+│  Note, CategoryPath, CategorizationAction, etc.                 │
+│  Pure business logic with no external dependencies              │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
 ### Key Components
 
-- **Agent**: Uses `generateText()` from Vercel AI SDK with tool-calling capabilities to load notes, list categories, and apply category changes
-- **Domain**: Contains `Note` and `CategoryPath` value objects that represent the core business concepts
-- **Ports**: Defines the `WorkspacePort` interface for workspace operations
-- **Adapters**: `FsWorkspace` implements the workspace interface using the filesystem, handling Markdown parsing with YAML frontmatter support
+- **Domain Layer**: Pure business logic with `Note`, `CategoryPath`, and `CategorizationAction` value objects. No external dependencies.
+
+- **Ports**: Define abstract interfaces that the application layer depends on:
+  - `WorkspacePort` - Load notes, list categories, apply changes
+  - `CategorizationPort` - AI-powered category suggestions
+  - `LoggerPort` - Logging abstraction
+
+- **Adapters**: Implement the ports with concrete technologies:
+  - `FsWorkspace` - Filesystem-based workspace with YAML frontmatter support
+  - `OpenAICategorizationAdapter` - Uses Vercel AI SDK with OpenAI models
+  - `ConsoleLogger` - Console-based logging
+
+- **Application Layer**: Contains `CategorizeNoteUseCase` which orchestrates the workflow, depending only on ports.
+
+- **Infrastructure**: `Container` wires ports to adapters via dependency injection, making it easy to swap implementations for testing.
+
+### Dependency Injection
+
+The `Container` class in `src/infrastructure/container.ts` handles all wiring:
+
+```typescript
+const container = createContainer();
+const useCase = container.categorizeNoteUseCase;
+await useCase.execute({ relativePath: "inbox/idea.md" });
+```
+
+For testing, you can inject mock adapters:
+
+```typescript
+const container = Container.withAdapters({
+    workspace: mockWorkspace,
+    categorizer: mockCategorizer,
+    logger: mockLogger,
+});
+```
 
 ## Technologies & Dependencies
 
@@ -122,11 +211,16 @@ bun run dev inbox/idea.md
 ### Example Output
 
 ```
-Categorizing note: inbox/idea.md
+[curator] Loading note: inbox/idea.md
+[curator] Analyzing note content...
+[curator] Moving note from "inbox" to "AI/Ideas"
+[curator] Successfully categorized note to: AI/Ideas
 
-=== Agent summary ===
-I analyzed the note "AI Tool Ideas" and moved it from inbox/ to AI/Ideas/
-as it contains ideas related to artificial intelligence tools and workflows.
+=== Categorization Result ===
+Note: "AI Tool Ideas"
+Moved: inbox → AI/Ideas
+Reasoning: The note discusses AI-related productivity tools and automation ideas,
+           making it a good fit for the AI/Ideas category.
 ```
 
 ## Development
@@ -134,6 +228,9 @@ as it contains ideas related to artificial intelligence tools and workflows.
 ```bash
 # Run the CLI in development mode
 bun run dev <path-to-note>
+
+# Enable debug logging
+DEBUG=true bun src/cli/index.ts inbox/idea.md
 
 # Type checking
 bun run build
@@ -144,7 +241,9 @@ bun test
 
 ## Project Structure Notes
 
-- The agent uses **tool-calling** with up to 8 steps to interact with the workspace
+- **Hexagonal Architecture**: Clean separation between domain, application, ports, and adapters
+- **Dependency Injection**: The `Container` class wires all dependencies, making testing easy
+- **Structured AI Output**: Uses `generateObject()` for reliable, typed AI responses
 - Categories are derived from folder paths (e.g., `AI/Agents` corresponds to the `AI/Agents/` folder)
 - The `FsWorkspace` adapter handles YAML frontmatter parsing and file operations
 - Notes are identified by their workspace-relative paths
