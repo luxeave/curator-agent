@@ -230,7 +230,7 @@ Reasoning: The note discusses AI-related productivity tools and automation ideas
 bun run dev <path-to-note>
 
 # Enable debug logging
-DEBUG=true bun src/cli/index.ts inbox/idea.md
+DEBUG=true bun src/cli/index.ts inbox/test-idea.md
 
 # Type checking
 bun run build
